@@ -64,23 +64,98 @@ workspace local foi usado `/opt/ros/lyrical`, mas o script `setup_all.sh`
 detecta Ubuntu 22.04 como Humble e Ubuntu 24.04 como Jazzy. Se o Pi estiver em
 outra versao de Ubuntu/ROS, revise o valor de `ROS_DISTRO` antes de instalar.
 
-## Preparar o Raspberry Pi
+## Comecar com um Raspberry Pi zerado
 
-Atualize o sistema:
+Use este caminho quando o Raspberry Pi estiver virgem, sem ROS, sem Git e sem
+dependencias do projeto.
+
+### 1. Gravar o sistema operacional
+
+Em outro computador, use o Raspberry Pi Imager ou ferramenta equivalente.
+
+Imagem recomendada:
+
+```text
+Ubuntu Server 24.04 LTS arm64
+```
+
+Essa imagem sera usada com ROS 2 Jazzy. Se voce precisar usar ROS 2 Humble,
+grave `Ubuntu Server 22.04 LTS arm64`.
+
+Durante a gravacao, configure:
+
+- Usuario e senha do Pi.
+- Hostname, por exemplo `rebotarm-pi`.
+- Wi-Fi ou rede cabeada.
+- SSH habilitado.
+- Locale/teclado conforme sua preferencia.
+
+Se voce gravar Raspberry Pi OS/Debian em vez de Ubuntu, os comandos de
+instalacao do ROS 2 via `apt` deste documento podem nao funcionar. Para este
+projeto, prefira Ubuntu arm64.
+
+### 2. Primeiro boot e acesso
+
+Ligue o Pi, aguarde o primeiro boot e acesse por SSH:
+
+```bash
+ssh usuario@IP_DO_PI
+```
+
+Exemplo:
+
+```bash
+ssh wesley@192.168.1.50
+```
+
+Confirme sistema e arquitetura:
+
+```bash
+lsb_release -a
+uname -m
+```
+
+Saida esperada:
+
+- Ubuntu `24.04` ou `22.04`.
+- Arquitetura `aarch64`.
+
+### 3. Atualizar o sistema base
+
+Em um Pi novo, faca a atualizacao antes de clonar ou instalar o projeto:
 
 ```bash
 sudo apt update
 sudo apt upgrade -y
-sudo apt install -y git curl wget lsb-release ca-certificates \
-  build-essential cmake python3-pip python3-venv
+sudo reboot
 ```
 
-Opcional, mas util para acesso remoto:
+Depois do reboot, entre novamente por SSH:
+
+```bash
+ssh usuario@IP_DO_PI
+```
+
+### 4. Instalar ferramentas minimas
+
+Esses pacotes sao necessarios antes do clone do repositorio e antes do
+`setup_all.sh`:
+
+```bash
+sudo apt update
+sudo apt install -y git curl wget lsb-release ca-certificates \
+  build-essential cmake python3-pip python3-venv \
+  gnupg software-properties-common openssh-client
+```
+
+Se voce quiser administrar o Pi por SSH e manter sessoes longas durante build:
 
 ```bash
 sudo apt install -y openssh-server tmux htop
 sudo systemctl enable --now ssh
 ```
+
+## Preparar permissoes do Raspberry Pi
 
 Configure grupos de usuario para acesso a dispositivos seriais:
 
@@ -89,7 +164,12 @@ sudo usermod -aG dialout $USER
 sudo usermod -aG plugdev $USER
 ```
 
-Depois desse comando, faca logout/login ou reinicie o Pi.
+Depois desse comando, faca logout/login ou reinicie o Pi. Em um Pi recem
+instalado, reiniciar neste ponto evita problemas de permissao mais tarde:
+
+```bash
+sudo reboot
+```
 
 ## Carregar o projeto no Pi a partir do GitHub
 
@@ -112,6 +192,15 @@ O token precisa ter permissao de leitura para este repositorio privado. Para
 atualizar o repositorio a partir do Pi no futuro, ele tambem precisa de
 `Contents: Read and write`.
 
+Para criar um token:
+
+```text
+https://github.com/settings/tokens
+```
+
+Use token apenas no terminal. Nao salve o token dentro do repositorio, README,
+scripts ou historico de comandos compartilhado.
+
 ### Opcao B: SSH
 
 Configure uma chave SSH no Pi e adicione a chave publica em:
@@ -132,6 +221,12 @@ Depois de cadastrar a chave no GitHub:
 ```bash
 cd ~
 git clone git@github.com:wesleycatao/rebotarm-ros2-ws.git ros2_ws
+```
+
+Teste a conexao SSH com o GitHub, se precisar:
+
+```bash
+ssh -T git@github.com
 ```
 
 ### Opcao C: copiar desta maquina por SSH
@@ -159,8 +254,13 @@ O projeto possui um instalador na raiz:
 
 ```bash
 cd ~/ros2_ws
+chmod +x setup_all.sh
 ./setup_all.sh
 ```
+
+Esse comando precisa de internet e vai pedir senha de `sudo` para instalar ROS
+2, dependencias do sistema, pacotes Python e ferramentas de build. Em um
+Raspberry Pi virgem, a primeira execucao pode demorar bastante.
 
 O script faz, em linhas gerais:
 
@@ -179,6 +279,13 @@ Ao terminar, abra um novo terminal ou rode:
 ```bash
 source ~/.bashrc
 source ~/ros2_ws/install/setup.bash
+```
+
+Se o script adicionou seu usuario a grupos ou se algum dispositivo USB/CAN nao
+aparecer com permissao correta, reinicie:
+
+```bash
+sudo reboot
 ```
 
 ## Instalacao manual
@@ -619,13 +726,17 @@ teste primeiro tudo na mesma maquina com `mock_arm`.
 
 ## Checklist para uma instalacao futura no Pi
 
-1. Instalar Ubuntu arm64 no Raspberry Pi.
-2. Atualizar sistema e habilitar SSH.
-3. Clonar `wesleycatao/rebotarm-ros2-ws` em `~/ros2_ws`.
-4. Rodar `./setup_all.sh` ou seguir a instalacao manual.
-5. Garantir o SDK em `~/ros2_ws/third_party/reBotArm_control_py`.
-6. Compilar com `colcon build --symlink-install`.
-7. Testar `mock_arm` e GUI.
-8. Configurar permissao de `/dev/ttyACM0` ou `can0`.
-9. Rodar `rebotarm_bringup` com o modelo correto.
-10. Rodar a GUI localmente ou em outro computador na mesma rede.
+1. Gravar Ubuntu Server/Desktop arm64 no Raspberry Pi.
+2. Habilitar rede e SSH no primeiro boot.
+3. Atualizar o sistema com `sudo apt update`, `sudo apt upgrade -y` e reboot.
+4. Instalar ferramentas minimas: `git`, `curl`, `wget`, `ca-certificates`, `build-essential`, `cmake`, `python3-pip`.
+5. Configurar acesso ao repositorio privado via token HTTPS ou chave SSH.
+6. Clonar `wesleycatao/rebotarm-ros2-ws` em `~/ros2_ws`.
+7. Configurar grupos `dialout` e `plugdev`, depois reiniciar.
+8. Rodar `./setup_all.sh` ou seguir a instalacao manual.
+9. Garantir o SDK em `~/ros2_ws/third_party/reBotArm_control_py`.
+10. Compilar com `colcon build --symlink-install`.
+11. Testar `mock_arm` e GUI.
+12. Configurar permissao de `/dev/ttyACM0` ou `can0`.
+13. Rodar `rebotarm_bringup` com o modelo correto.
+14. Rodar a GUI localmente ou em outro computador na mesma rede.

@@ -1,0 +1,37 @@
+# ROS 2 build artifacts
+build/
+install/
+log/
+
+# Python artifacts
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Editor and OS files
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store
+
+# Runtime/local files
+.exe
+home/
+src/rebotarmcontroller/third_party/reBotArm_control_py/
+.ros/
+*.log
+*.bag
+*.db3
+
+# Temporary files
+tmp/
+temp/

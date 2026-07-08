@@ -7,6 +7,16 @@ O foco do Raspberry Pi deve ser rodar o controlador e o bringup do robo. A GUI
 pode rodar no proprio Pi se houver ambiente grafico, mas normalmente e mais
 confortavel executar a GUI em um notebook na mesma rede ROS 2.
 
+Repositorio do projeto:
+
+```text
+https://github.com/wesleycatao/rebotarm-ros2-ws
+```
+
+O repositorio esta privado. Para clonar em outro computador ou Raspberry Pi,
+use uma chave SSH cadastrada no GitHub ou um Personal Access Token com acesso a
+este repositorio.
+
 ## Visao geral
 
 Workspace ROS 2 para controlar o braco robotico reBotArm.
@@ -81,25 +91,52 @@ sudo usermod -aG plugdev $USER
 
 Depois desse comando, faca logout/login ou reinicie o Pi.
 
-## Carregar o projeto no Pi
+## Carregar o projeto no Pi a partir do GitHub
 
-Crie o workspace:
+O repositorio ja contem a estrutura completa do workspace ROS 2. No Raspberry
+Pi, clone o projeto diretamente como `~/ros2_ws`.
 
-```bash
-mkdir -p ~/ros2_ws/src
-cd ~/ros2_ws
-```
-
-Se o projeto estiver em um repositorio Git:
+### Opcao A: HTTPS com token
 
 ```bash
-cd ~/ros2_ws
-git clone <URL_DO_REPOSITORIO> repo_tmp
-cp -a repo_tmp/src/* src/
-cp -a repo_tmp/setup_all.sh .
+cd ~
+git clone https://github.com/wesleycatao/rebotarm-ros2-ws.git ros2_ws
 ```
 
-Se voce estiver copiando a partir desta maquina por SSH:
+Quando o Git pedir credenciais:
+
+- Username: `wesleycatao`
+- Password: cole um Personal Access Token do GitHub, nao a senha da conta
+
+O token precisa ter permissao de leitura para este repositorio privado. Para
+atualizar o repositorio a partir do Pi no futuro, ele tambem precisa de
+`Contents: Read and write`.
+
+### Opcao B: SSH
+
+Configure uma chave SSH no Pi e adicione a chave publica em:
+
+```text
+https://github.com/settings/keys
+```
+
+Exemplo:
+
+```bash
+ssh-keygen -t ed25519 -C "raspberry-pi-rebotarm"
+cat ~/.ssh/id_ed25519.pub
+```
+
+Depois de cadastrar a chave no GitHub:
+
+```bash
+cd ~
+git clone git@github.com:wesleycatao/rebotarm-ros2-ws.git ros2_ws
+```
+
+### Opcao C: copiar desta maquina por SSH
+
+Use esta opcao apenas se nao quiser clonar pelo GitHub:
 
 ```bash
 rsync -av --exclude build --exclude install --exclude log \
@@ -112,6 +149,9 @@ No Pi:
 cd ~/ros2_ws
 chmod +x setup_all.sh
 ```
+
+Nao copie `build/`, `install/` e `log/` entre maquinas. Essas pastas sao
+artefatos locais de compilacao e devem ser recriadas no Raspberry Pi.
 
 ## Instalacao rapida
 
@@ -581,7 +621,7 @@ teste primeiro tudo na mesma maquina com `mock_arm`.
 
 1. Instalar Ubuntu arm64 no Raspberry Pi.
 2. Atualizar sistema e habilitar SSH.
-3. Copiar o workspace para `~/ros2_ws`.
+3. Clonar `wesleycatao/rebotarm-ros2-ws` em `~/ros2_ws`.
 4. Rodar `./setup_all.sh` ou seguir a instalacao manual.
 5. Garantir o SDK em `~/ros2_ws/third_party/reBotArm_control_py`.
 6. Compilar com `colcon build --symlink-install`.

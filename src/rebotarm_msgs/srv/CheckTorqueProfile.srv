@@ -1,0 +1,13 @@
+string step_id
+float64 phase
+---
+bool success
+string severity
+string message
+string[] joint_names
+float64[] torque
+float64[] warn_min
+float64[] warn_max
+float64[] fail_min
+float64[] fail_max
+string[] status

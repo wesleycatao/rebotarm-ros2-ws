@@ -7,7 +7,6 @@ from typing import Dict
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QButtonGroup,
-    QComboBox,
     QDoubleSpinBox,
     QFormLayout,
     QGridLayout,
@@ -20,6 +19,8 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+
+from ..widgets.layout_utils import fit_button_text
 
 
 class _JointMitRow(QWidget):
@@ -49,7 +50,7 @@ class _JointMitRow(QWidget):
         lay.addWidget(self._wrap("kd", self.kd))
         lay.addWidget(self._wrap("tau", self.tau))
         lay.addWidget(self._wrap("vlim", self.vlim))
-        self.setMinimumHeight(94)
+        self.setMinimumHeight(76)
 
     def _spin(self, mn, mx, val, suffix) -> QDoubleSpinBox:
         s = QDoubleSpinBox()
@@ -102,15 +103,19 @@ class MitTab(QWidget):
         scroll.setWidget(self._host)
 
         # ---- Buttons ----
-        self._btn_send_all = QPushButton("Send all")
+        self._btn_send_all = QPushButton("Enviar todos")
         self._btn_send_all.setObjectName("PrimaryButton")
-        self._btn_send_all.setMinimumHeight(56)
+        self._btn_send_all.setMinimumHeight(40)
         self._btn_send_all.clicked.connect(self._send_all)
+        self._btn_send_all.setEnabled(False)
 
-        self._btn_stop = QPushButton("Zero all")
+        self._btn_stop = QPushButton("Zerar todos")
         self._btn_stop.setObjectName("WarningButton")
-        self._btn_stop.setMinimumHeight(56)
+        self._btn_stop.setMinimumHeight(40)
         self._btn_stop.clicked.connect(self._zero_all)
+        self._btn_stop.setEnabled(False)
+        fit_button_text(self._btn_send_all)
+        fit_button_text(self._btn_stop)
 
         top = QHBoxLayout()
         top.setSpacing(18)
@@ -144,6 +149,8 @@ class MitTab(QWidget):
                 insert_at += 1
 
     def _send_all(self) -> None:
+        if not self._btn_send_all.isEnabled():
+            return
         mit = self._mode_mit.isChecked()
         for name, row in self._rows.items():
             if mit:
@@ -161,6 +168,8 @@ class MitTab(QWidget):
                 )
 
     def _zero_all(self) -> None:
+        if not self._btn_stop.isEnabled():
+            return
         for row in self._rows.values():
             row.pos.setValue(0.0)
             row.vel.setValue(0.0)
@@ -169,3 +178,8 @@ class MitTab(QWidget):
             row.tau.setValue(0.0)
             row.vlim.setValue(0.0)
         self._send_all()
+
+    def set_robot_ready(self, ready: bool) -> None:
+        """Gate raw publishers when the controller heartbeat is unavailable."""
+        self._btn_send_all.setEnabled(bool(ready))
+        self._btn_stop.setEnabled(bool(ready))

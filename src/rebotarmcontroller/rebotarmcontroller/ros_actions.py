@@ -6,8 +6,77 @@ from control_msgs.action import FollowJointTrajectory, GripperCommand
 import numpy as np
 from rclpy.action import ActionServer, CancelResponse, GoalResponse
 from rebotarm_msgs.action import MoveToPose
-
 from .conversions import pose_to_xyz_rpy
+
+
+def compute_phase_by_position(
+    current_positions: np.ndarray,
+    trajectory_positions: list[np.ndarray],
+) -> float:
+    """Compute motion phase [0.0, 1.0] from current joint positions.
+
+    The phase is derived from the distance travelled along the planned joint
+    trajectory, making it robust to temporal variations (delays, speed changes,
+    pauses) that would distort a time-based phase.
+
+    Args:
+        current_positions: Current joint positions.
+        trajectory_positions: Planned joint positions (one array per point).
+
+    Returns:
+        Phase in [0.0, 1.0]. Returns 0.0 if the trajectory is empty or invalid.
+    """
+    if not trajectory_positions:
+        return 0.0
+
+    targets = [np.asarray(t, dtype=np.float64).reshape(-1) for t in trajectory_positions]
+    n = len(current_positions)
+    if any(len(t) != n for t in targets):
+        return 0.0
+
+    if len(targets) == 1:
+        return 0.0
+
+    # Compute cumulative arc-length along the trajectory in joint space.
+    segment_lengths = [
+        float(np.linalg.norm(targets[i] - targets[i - 1]))
+        for i in range(1, len(targets))
+    ]
+    total_length = sum(segment_lengths)
+    if total_length < 1e-9:
+        return 0.0
+
+    # Find closest projection on any segment.
+    best_phase = 0.0
+    min_dist_sq = float("inf")
+    accumulated = 0.0
+
+    for i in range(len(targets) - 1):
+        p0 = targets[i]
+        p1 = targets[i + 1]
+        segment = p1 - p0
+        seg_len_sq = float(np.dot(segment, segment))
+
+        if seg_len_sq < 1e-18:
+            # Degenerate segment; use distance to the single point.
+            dist_sq = float(np.sum((current_positions - p0) ** 2))
+            if dist_sq < min_dist_sq:
+                min_dist_sq = dist_sq
+                best_phase = accumulated / total_length
+            continue
+
+        # Project current position onto the segment, clamped to [0, 1].
+        t = max(0.0, min(1.0, np.dot(current_positions - p0, segment) / seg_len_sq))
+        projection = p0 + t * segment
+        dist_sq = float(np.sum((current_positions - projection) ** 2))
+
+        if dist_sq < min_dist_sq:
+            min_dist_sq = dist_sq
+            best_phase = (accumulated + t * segment_lengths[i]) / total_length
+
+        accumulated += segment_lengths[i]
+
+    return float(max(0.0, min(1.0, best_phase)))
 
 
 class ArmActions:
@@ -77,6 +146,7 @@ class ArmActions:
     def execute_move_to_pose(self, goal_handle):
         goal = goal_handle.request
         result = MoveToPose.Result()
+        self._node.reset_torque_profile_monitor()
 
         try:
             x, y, z, roll, pitch, yaw = pose_to_xyz_rpy(goal.target_pose)
@@ -93,24 +163,65 @@ class ArmActions:
             )
         self._node.publish_arm_status()
 
-        deadline = time.monotonic() + max(float(goal.duration), 0.0) + 2.0
-        while self._hardware.motion_active():
-            if self._hardware.state_machine == "SAFE_HOMING":
-                self._hardware.stop_motion()
-                break
-            if goal_handle.is_cancel_requested:
-                self._hardware.stop_motion()
-                self._hardware.hold_current_position()
-                return self._fail_move_to_pose(
-                    goal_handle, result, "move_to_pose canceled", canceled=True
-                )
-            if time.monotonic() > deadline:
-                self._hardware.stop_motion()
-                self._hardware.hold_current_position()
-                return self._fail_move_to_pose(
-                    goal_handle, result, "move_to_pose timeout"
-                )
-            time.sleep(0.02)
+        # Capture planned trajectory and start position for position-based phase.
+        planned_trajectory = self._hardware.get_planned_trajectory()
+        start_q = self._hardware.get_joint_positions().copy()
+        target_q = None
+        if planned_trajectory:
+            target_q = np.array(planned_trajectory[-1], dtype=np.float64, copy=True)
+        else:
+            # Fallback: use the controller's end-pose target for straight-line distance.
+            target_q = self._hardware.get_endpos_target()
+
+        self._node.start_safety_monitor(
+            "move_to_pose",
+            trajectory=planned_trajectory,
+            start_q=start_q,
+            target_q=target_q,
+        )
+
+        monitor_start = time.monotonic()
+        duration = max(float(goal.duration), 0.001)
+        deadline = monitor_start + duration + 2.0
+        try:
+            while self._hardware.motion_active():
+                current_q = self._hardware.get_joint_positions()
+                if planned_trajectory:
+                    phase = compute_phase_by_position(current_q, planned_trajectory)
+                elif target_q is not None:
+                    total_dist = float(np.linalg.norm(target_q - start_q)) or 1e-9
+                    traveled = float(np.linalg.norm(current_q - start_q))
+                    phase = max(0.0, min(1.0, traveled / total_dist))
+                else:
+                    # Last resort: time-based phase.
+                    phase = max(0.0, min(1.0, (time.monotonic() - monitor_start) / duration))
+                should_stop, _severity, violation = self._node.check_torque_profile(phase)
+                if should_stop:
+                    self._hardware.stop_motion()
+                    self._hardware.hold_current_position()
+                    return self._fail_move_to_pose(
+                        goal_handle,
+                        result,
+                        f"torque profile violation: {violation}",
+                    )
+                if self._hardware.state_machine == "SAFE_HOMING":
+                    self._hardware.stop_motion()
+                    break
+                if goal_handle.is_cancel_requested:
+                    self._hardware.stop_motion()
+                    self._hardware.hold_current_position()
+                    return self._fail_move_to_pose(
+                        goal_handle, result, "move_to_pose canceled", canceled=True
+                    )
+                if time.monotonic() > deadline:
+                    self._hardware.stop_motion()
+                    self._hardware.hold_current_position()
+                    return self._fail_move_to_pose(
+                        goal_handle, result, "move_to_pose timeout"
+                    )
+                time.sleep(0.01)
+        finally:
+            self._node.stop_safety_monitor()
 
         if self._hardware.state_machine == "SAFE_HOMING":
             return self._fail_move_to_pose(
@@ -159,7 +270,13 @@ class ArmActions:
             return result
 
         try:
+            self._node.reset_torque_profile_monitor()
             self._hardware.begin_trajectory_stream()
+            # Register full trajectory (including inserted start point) for the
+            # independent safety monitor.
+            self._node.start_safety_monitor(
+                "follow_joint_trajectory", trajectory=targets
+            )
             self._node.publish_arm_status()
             start = time.monotonic()
             point_times = [
@@ -170,6 +287,7 @@ class ArmActions:
             if point_times[0] > 0.0:
                 targets.insert(0, self._hardware.get_joint_positions().copy())
                 point_times.insert(0, 0.0)
+            total_time = max(point_times[-1], 0.001)
 
             for index in range(1, len(targets)):
                 q0 = targets[index - 1]
@@ -192,6 +310,20 @@ class ArmActions:
                     ratio = 1.0 if t1 <= t0 else max(0.0, min(1.0, (now - t0) / (t1 - t0)))
                     target = q0 + (q1 - q0) * ratio
                     self._hardware.set_joint_position_target(target)
+                    current_positions = self._hardware.get_joint_positions()
+                    phase = compute_phase_by_position(current_positions, targets)
+                    should_stop, _severity, violation = self._node.check_torque_profile(phase)
+                    if should_stop:
+                        self._hardware.stop_motion()
+                        self._hardware.hold_current_position()
+                        goal_handle.abort()
+                        result.error_code = (
+                            FollowJointTrajectory.Result.PATH_TOLERANCE_VIOLATED
+                        )
+                        result.error_string = (
+                            f"torque profile violation: {violation}"
+                        )
+                        return result
 
                     positions = self._hardware.get_joint_positions()
                     velocities = self._hardware.get_joint_velocities()
@@ -217,7 +349,7 @@ class ArmActions:
 
                     if now >= t1:
                         break
-                    time.sleep(0.02)
+                    time.sleep(0.01)
 
         except Exception as exc:
             self._hardware.hold_current_position()
@@ -226,6 +358,7 @@ class ArmActions:
             result.error_string = f"execution failed: {exc}"
             return result
         finally:
+            self._node.stop_safety_monitor()
             if self._hardware.state_machine != "SAFE_HOMING":
                 self._hardware.set_state_machine("IDLE")
                 self._node.publish_arm_status()

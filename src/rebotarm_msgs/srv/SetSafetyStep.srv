@@ -1,0 +1,5 @@
+string step_id
+float64 payload_kg
+---
+bool success
+string message

@@ -1,0 +1,131 @@
+# Vision pipeline tuned for YOLO-based object detection on the Raspberry Pi 5.
+# Copy your trained model to the Pi and point model_path to it.
+#
+# Recommended model format on Pi 5: NCNN exported by rebotarm_yolo_trainer.
+# Example model_path: /home/pi/rebotarm_modelos/deploy/best_ncnn_model
+
+rebotarm_webcam:
+  ros__parameters:
+    camera_index: 0
+    frame_id: camera_link
+    width: 640
+    height: 480
+    fps: 15.0
+    camera_matrix: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+    distortion_coefficients: [0.0, 0.0, 0.0, 0.0, 0.0]
+    distortion_model: plumb_bob
+
+rebotarm_segmentation:
+  ros__parameters:
+    image_topic: /camera/image_raw
+    objects_topic: /rebotarm/vision/objects_2d
+    debug_image_topic: /rebotarm/vision/debug_image
+    process_service: /rebotarm_segmentation/process_frame
+    # "manual" is ideal when the GUI triggers one frame every ~10 seconds.
+    process_mode: manual
+    max_processing_fps: 1.0
+    # Force YOLO backend. Use "auto" to allow OpenCV fallback if model fails.
+    backend: yolo
+    # Set this to the path of your trained NCNN model folder on the Pi.
+    model_path: ""
+    confidence_threshold: 0.35
+    # 320 is fast on the Pi 5; use 416 if objects are small or you need more precision.
+    image_size: 320
+    target_classes: []
+    auxiliary_attribute: ""
+    # Area limits are less critical with YOLO, but keep sane defaults to filter noise.
+    min_area_px: 500.0
+    max_area_px: 0.0
+    max_area_ratio: 0.60
+    min_bbox_long_side_px: 0.0
+    min_bbox_short_side_px: 0.0
+    max_bbox_long_side_px: 0.0
+    max_bbox_short_side_px: 0.0
+    max_contour_points: 48
+    calibrated_profile_json: "{}"
+    gripper_width_px: 0.0
+    grasp_inset_ratio: 0.10
+    # OpenCV fallback parameters (used only if backend is opencv or model fails).
+    opencv_mode: bright
+    center_method: moments
+    direction_method: min_area_rect
+    direction_sense_method: none
+    shape_filter: any
+    shape_epsilon_ratio: 0.035
+    circle_min_circularity: 0.72
+    square_aspect_tolerance: 0.22
+    lying_aspect_ratio_threshold: 1.8
+    draw_clearance: true
+    use_workspace_mask: false
+    draw_workspace_limit: true
+    workspace_limit_shape: polygon
+    workspace_limit_pixels: [60.0, 70.0, 1378.0, 70.0, 1378.0, 1005.0, 60.0, 1005.0]
+    workspace_circle_pixel: [320.0, 240.0, 180.0]
+    workspace_mask_margin_px: 0.0
+    hsv_lower: [0, 40, 40]
+    hsv_upper: [179, 255, 255]
+    brightness_threshold: 85
+    brightness_invert: false
+    blur_kernel: 3
+    canny_low: 45
+    canny_high: 130
+    edge_aperture_size: 3
+    edge_dilate_iterations: 1
+    edge_erode_iterations: 0
+    roi_margin_px: 45
+    morph_kernel: 9
+    morph_open_iterations: 1
+    morph_close_iterations: 0
+    min_solidity: 0.2
+    min_extent: 0.1
+    max_extent: 0.92
+    min_aspect_ratio: 1.0
+    max_aspect_ratio: 6.0
+
+rebotarm_object_pose:
+  ros__parameters:
+    input_topic: /rebotarm/vision/objects_2d
+    output_topic: /rebotarm/vision/objects
+    target_frame: base_link
+    image_width: 640.0
+    image_height: 480.0
+    use_workspace_homography: false
+    calibration_pixel_points: []
+    calibration_xy_points: []
+    workspace_pixel_vertices: [0.0, 0.0, 639.0, 0.0, 639.0, 479.0, 0.0, 479.0]
+    workspace_xy_vertices: [0.42, 0.20, 0.42, -0.20, 0.18, -0.20, 0.18, 0.20]
+    pixel_to_base_homography: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+    base_x_from_image_v: [0.42, 0.18]
+    base_y_from_image_u: [0.20, -0.20]
+    table_z: 0.0
+    default_object_height: 0.035
+    min_confidence: 0.35
+    x_limits: [0.16, 0.46]
+    y_limits: [-0.24, 0.24]
+    z_limits: [-0.02, 0.20]
+    use_operation_limits: false
+    operation_limit_shape: polygon
+    operation_limit_xy_vertices: []
+    operation_limit_circle: [0.30, 0.0, 0.18]
+    operation_limit_margin_m: 0.0
+    edge_margin_px: 18.0
+    pick_roll: 0.0
+    pick_pitch: 1.5708
+    yaw_offset: 0.0
+
+rebotarm_pick_scheduler:
+  ros__parameters:
+    objects_topic: /rebotarm/vision/objects
+    queue_topic: /rebotarm/vision/pick_queue
+    selected_topic: /rebotarm/vision/selected_object
+    min_score: 0.35
+    min_confidence: 0.35
+    stable_frames: 1
+    max_objects: 8
+    strategy: score
+    allowed_orientations: [horizontal, vertical, ambiguous]
+    min_clearance_px: 0.0
+    min_clearance_horizontal_px: 4.0
+    min_clearance_vertical_px: 20.0
+    auxiliary_attribute: ""
+    route_origin_xy: [0.0, 0.0]

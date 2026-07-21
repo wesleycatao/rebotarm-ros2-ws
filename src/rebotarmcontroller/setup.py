@@ -10,7 +10,7 @@ setup(
         ("share/ament_index/resource_index/packages", [f"resource/{package_name}"]),
         (f"share/{package_name}", ["package.xml"]),
     ],
-    install_requires=["setuptools"],
+    install_requires=["setuptools", "PyYAML"],
     zip_safe=True,
     maintainer="reBotArm Maintainers",
     maintainer_email="support@example.com",
@@ -19,10 +19,12 @@ setup(
     entry_points={
         "console_scripts": [
             "reBotArmController = rebotarmcontroller.rebotarm_controller:main",
+            "DioBridge = rebotarmcontroller.dio_bridge:main",
             "GravityCompensation = rebotarmcontroller.examples.gravity_compensation:main",
             "GripperControl = rebotarmcontroller.examples.gripper_control:main",
             "MoveTo = rebotarmcontroller.examples.move_to:main",
             "MoveToPose = rebotarmcontroller.examples.move_to_pose:main",
+            "TorqueProfile = rebotarmcontroller.torque_profile:main",
         ],
     },
 )

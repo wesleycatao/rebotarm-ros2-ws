@@ -1,0 +1,37 @@
+std_msgs/Header header
+string object_id
+int32 class_id
+string class_name
+float32 confidence
+float32 score
+bool reachable
+string reject_reason
+geometry_msgs/Point center_pixel
+geometry_msgs/Pose pose
+geometry_msgs/Vector3 dimensions
+float32 area_px
+float32 yaw
+float32 axis_yaw
+float32 gripper_yaw
+int32 direction_sign
+string direction_sense
+geometry_msgs/Point direction_start_pixel
+geometry_msgs/Point direction_end_pixel
+float32 pick_width
+int32 object_number
+geometry_msgs/Point[] bounding_box_pixels
+float32 clearance_left_px
+float32 clearance_right_px
+float32 clearance_up_px
+float32 clearance_down_px
+geometry_msgs/Point[] contour_pixels
+
+# Orientation and grasp information added by AI calibration.
+string orientation
+geometry_msgs/Point[] grasp_zone_pixels
+geometry_msgs/Point[] grasp_inset_zone_pixels
+geometry_msgs/Point preferred_grasp_pixel
+float32 grasp_inset_ratio
+bool pickable
+string pickable_reason
+float32 gripper_width_estimate

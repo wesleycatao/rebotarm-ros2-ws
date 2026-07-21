@@ -17,6 +17,11 @@ def main(argv: list[str] | None = None) -> int:
         default="rebotarm",
         help="Namespace do braço (default: rebotarm)",
     )
+    parser.add_argument(
+        "--usability-test",
+        action="store_true",
+        help="Abre o roteiro cronometrado para avaliação moderada com operadores.",
+    )
     args, _unknown = parser.parse_known_args(argv)
 
     # Import here so argparse --help works even if Qt is not installed yet.
@@ -30,7 +35,7 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 2
 
-    return run(namespace=args.namespace)
+    return run(namespace=args.namespace, usability_test=args.usability_test)
 
 
 if __name__ == "__main__":

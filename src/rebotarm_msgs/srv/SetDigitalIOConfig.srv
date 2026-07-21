@@ -1,0 +1,7 @@
+# Update the tag / enabled flag of a digital I/O point by its logical id.
+string id
+string tag
+bool enabled
+---
+bool success
+string message

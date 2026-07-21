@@ -142,6 +142,7 @@ class HardwareManager:
             "LOWLEVEL_STREAMING",
             "GRAVITY_COMP",
             "SAFE_HOMING",
+            "PROTECTIVE_STOP",
         ):
             raise ValueError(f"unsupported state machine value: {state}")
         self._state_machine = state
@@ -231,6 +232,8 @@ class HardwareManager:
 
     @_locked
     def start_endpos_control(self) -> None:
+        if self._state_machine == "PROTECTIVE_STOP":
+            raise RuntimeError("reset safety fault before enabling motion")
         if self._gravity_comp_active:
             raise RuntimeError("stop gravity compensation before starting endpos control")
         if self._state_machine in ("SAFE_HOMING", "TRAJ_RUNNING"):
@@ -320,6 +323,8 @@ class HardwareManager:
         kd: float,
         tau: float,
     ) -> None:
+        if self._state_machine == "PROTECTIVE_STOP":
+            raise RuntimeError("rejecting MIT command during protective stop")
         index = self._joint_index(joint_name)
         self._begin_lowlevel_streaming("mit")
         q = self._arm_group.get_positions(request_feedback=True)
@@ -349,6 +354,8 @@ class HardwareManager:
         pos: float,
         vlim: float,
     ) -> None:
+        if self._state_machine == "PROTECTIVE_STOP":
+            raise RuntimeError("rejecting pos_vel command during protective stop")
         index = self._joint_index(joint_name)
         self._begin_lowlevel_streaming("pos_vel")
         q = self._arm_group.get_positions(request_feedback=True)
@@ -369,7 +376,7 @@ class HardwareManager:
 
     def _require_idle(self, what: str) -> None:
         state = self._state_machine
-        if state in ("TRAJ_RUNNING", "GRAVITY_COMP", "SAFE_HOMING"):
+        if state in ("TRAJ_RUNNING", "GRAVITY_COMP", "SAFE_HOMING", "PROTECTIVE_STOP"):
             raise RuntimeError(f"rejecting {what} in state {state}")
 
     @_locked
@@ -604,6 +611,8 @@ class HardwareManager:
         self._gripper_target_position = None
 
     def _begin_gripper_command(self, *, allow_endpos: bool = False) -> None:
+        if self.state_machine == "PROTECTIVE_STOP":
+            raise RuntimeError("rejecting gripper command during protective stop")
         if not self._enabled:
             raise RuntimeError("rejecting gripper command while arm is disabled")
         if self._gravity_comp_active or self.state_machine == "GRAVITY_COMP":
@@ -627,6 +636,8 @@ class HardwareManager:
     # ------------------------------------------------------------------
 
     def _begin_lowlevel_streaming(self, required_mode: str) -> None:
+        if self._state_machine == "PROTECTIVE_STOP":
+            raise RuntimeError("rejecting low-level command during protective stop")
         if not self._enabled:
             raise RuntimeError("rejecting low-level command while arm is disabled")
         if self._gravity_comp_active or self.state_machine == "GRAVITY_COMP":
@@ -703,6 +714,51 @@ class HardwareManager:
 
     def motion_active(self) -> bool:
         return bool(self._endpos_ctrl._moving)
+
+    def get_planned_trajectory(self) -> list[np.ndarray]:
+        """Return a copy of the last planned end-pose trajectory in joint space.
+
+        Each element is a numpy array of arm joint positions. Empty list if no
+        trajectory is currently available.
+        """
+        traj = getattr(self._endpos_ctrl, "_traj", None)
+        if traj is None:
+            return []
+        return [np.array(p, dtype=np.float64, copy=True) for p in traj]
+
+    def get_endpos_target(self) -> np.ndarray | None:
+        """Return a copy of the current end-pose joint target, if available."""
+        target = getattr(self._endpos_ctrl, "_q_target", None)
+        if target is None:
+            return None
+        return np.array(target, dtype=np.float64, copy=True)
+
+    @_locked
+    def enter_protective_stop(self, reason: str) -> None:
+        self._control_output_enabled = False
+        self.stop_motion()
+        self._endpos_ctrl._running = False
+        try:
+            self._robot.stop_control_loop()
+        except Exception:
+            pass
+        if reason and reason not in self._error_codes:
+            self._error_codes.append(reason)
+        self.set_state_machine("PROTECTIVE_STOP")
+
+    @_locked
+    def reset_protective_stop(self) -> None:
+        if self._state_machine != "PROTECTIVE_STOP":
+            self._error_codes = [
+                code for code in self._error_codes if not code.startswith("TORQUE_")
+            ]
+            return
+        self._error_codes = [
+            code for code in self._error_codes if not code.startswith("TORQUE_")
+        ]
+        self.set_state_machine("IDLE")
+        if self._enabled:
+            self._start_endpos_hold()
 
     def _endpos_loop_cb(self, robot, dt: float) -> None:
         del dt

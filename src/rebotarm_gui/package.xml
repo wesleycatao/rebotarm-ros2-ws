@@ -10,17 +10,24 @@
   <buildtool_depend>ament_python</buildtool_depend>
 
   <depend>rclpy</depend>
+  <depend>rebotarmcontroller</depend>
   <depend>rebotarm_msgs</depend>
+  <exec_depend>rebotarm_vision</exec_depend>
   <depend>std_srvs</depend>
   <depend>std_msgs</depend>
   <depend>sensor_msgs</depend>
   <depend>geometry_msgs</depend>
   <depend>control_msgs</depend>
+  <depend>action_msgs</depend>
   <depend>trajectory_msgs</depend>
   <depend>builtin_interfaces</depend>
+  <depend>rcl_interfaces</depend>
 
   <!-- GUI runtime (pip install PySide6 se nao empacotado) -->
   <exec_depend>python3-pyside6</exec_depend>
+  <exec_depend>python3-yaml</exec_depend>
+  <exec_depend>python3-matplotlib</exec_depend>
+  <exec_depend>python3-numpy</exec_depend>
 
   <test_depend>ament_copyright</test_depend>
   <test_depend>ament_flake8</test_depend>

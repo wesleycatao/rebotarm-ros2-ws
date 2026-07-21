@@ -1,0 +1,6 @@
+# Command a digital output (relay) to a given level by its logical id.
+string id
+bool value
+---
+bool success
+string message

@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 from rebotarm_msgs.srv import (
+    CheckTorqueProfile,
     GripperCommand,
     MoveToPoseIK,
+    SetSafetyStep,
     SetGripper,
+    SetTorqueProfile,
     SetZero,
 )
 from std_srvs.srv import Trigger
@@ -37,6 +40,10 @@ class ArmServices:
             (SetGripper, "gripper/set", self.set_gripper, node.reentrant_group),
             (GripperCommand, "gripper/open", self.open_gripper, node.slow_group),
             (GripperCommand, "gripper/close", self.close_gripper, node.slow_group),
+            (SetTorqueProfile, "safety/set_torque_profile", self.set_torque_profile, node.slow_group),
+            (SetSafetyStep, "safety/set_step", self.set_safety_step, node.reentrant_group),
+            (CheckTorqueProfile, "safety/check_torque_profile", self.check_torque_profile, node.reentrant_group),
+            (Trigger, "safety/reset_fault", self.reset_safety_fault, node.slow_group),
         )
         for srv_type, name, handler, group in services:
             node.create_service(
@@ -83,6 +90,62 @@ class ArmServices:
             self._hardware.stop_gravity_compensation,
             "gravity compensation stopped",
         )
+
+    def reset_safety_fault(self, _request, response):
+        return self._run(
+            response,
+            self._node.reset_safety_fault,
+            "safety fault reset",
+        )
+
+    def set_torque_profile(self, request, response):
+        try:
+            response.message = self._node.set_torque_profile(
+                request.profile_path,
+                request.mode,
+                int(request.violation_samples or 3),
+                request.active_step_id,
+                float(getattr(request, "derivative_limit", 0.0) or 0.0),
+            )
+            response.success = True
+        except Exception as exc:
+            response.success = False
+            response.message = str(exc)
+        self._node.publish_arm_status()
+        return response
+
+    def set_safety_step(self, request, response):
+        try:
+            self._node.set_torque_profile_step(request.step_id)
+            response.success = True
+            response.message = f"active safety step={request.step_id or 'default'}"
+        except Exception as exc:
+            response.success = False
+            response.message = str(exc)
+        return response
+
+    def check_torque_profile(self, request, response):
+        try:
+            severity, results = self._node.evaluate_current_torque(
+                request.phase,
+                request.step_id,
+            )
+            response.success = True
+            response.severity = severity
+            issues = [item.message() for item in results if item.status != "OK"]
+            response.message = "; ".join(issues[:3]) if issues else "OK"
+            response.joint_names = [item.joint_name for item in results]
+            response.torque = [float(item.torque) for item in results]
+            response.warn_min = [float(item.warn_min) for item in results]
+            response.warn_max = [float(item.warn_max) for item in results]
+            response.fail_min = [float(item.fail_min) for item in results]
+            response.fail_max = [float(item.fail_max) for item in results]
+            response.status = [item.status for item in results]
+        except Exception as exc:
+            response.success = False
+            response.severity = "FAIL"
+            response.message = str(exc)
+        return response
 
     def set_zero(self, request, response):
         def action():

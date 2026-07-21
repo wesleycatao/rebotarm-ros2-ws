@@ -15,6 +15,15 @@ def generate_launch_description():
     cmd_arbitration = LaunchConfiguration("cmd_arbitration")
     arm_namespace = LaunchConfiguration("arm_namespace")
     disable_after_safe_home = LaunchConfiguration("disable_after_safe_home")
+    torque_profile_path = LaunchConfiguration("torque_profile_path")
+    torque_profile_mode = LaunchConfiguration("torque_profile_mode")
+    torque_profile_step_id = LaunchConfiguration("torque_profile_step_id")
+    torque_profile_violation_samples = LaunchConfiguration(
+        "torque_profile_violation_samples"
+    )
+    torque_profile_derivative_limit = LaunchConfiguration(
+        "torque_profile_derivative_limit"
+    )
 
     return LaunchDescription(
         [
@@ -30,6 +39,17 @@ def generate_launch_description():
             DeclareLaunchArgument("cmd_arbitration", default_value="reject"),
             DeclareLaunchArgument("arm_namespace", default_value="rebotarm"),
             DeclareLaunchArgument("disable_after_safe_home", default_value="true"),
+            DeclareLaunchArgument("torque_profile_path", default_value=""),
+            DeclareLaunchArgument("torque_profile_mode", default_value="off"),
+            DeclareLaunchArgument("torque_profile_step_id", default_value="default"),
+            DeclareLaunchArgument(
+                "torque_profile_violation_samples",
+                default_value="3",
+            ),
+            DeclareLaunchArgument(
+                "torque_profile_derivative_limit",
+                default_value="0.0",
+            ),
             Node(
                 package="rebotarmcontroller",
                 executable="reBotArmController",
@@ -46,6 +66,17 @@ def generate_launch_description():
                         "disable_after_safe_home": ParameterValue(
                             disable_after_safe_home,
                             value_type=bool,
+                        ),
+                        "torque_profile_path": torque_profile_path,
+                        "torque_profile_mode": torque_profile_mode,
+                        "torque_profile_step_id": torque_profile_step_id,
+                        "torque_profile_violation_samples": ParameterValue(
+                            torque_profile_violation_samples,
+                            value_type=int,
+                        ),
+                        "torque_profile_derivative_limit": ParameterValue(
+                            torque_profile_derivative_limit,
+                            value_type=float,
                         ),
                     }
                 ],

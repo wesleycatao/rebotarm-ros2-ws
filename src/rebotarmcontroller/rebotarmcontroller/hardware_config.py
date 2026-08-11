@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import math
 import sys
 import tempfile
 from pathlib import Path
@@ -35,6 +36,11 @@ def _workspace_root() -> Path:
     for parent in here.parents:
         if (parent / "third_party" / "reBotArm_control_py").is_dir():
             return parent
+        source_package = parent / "src" / "rebotarmcontroller"
+        if (
+            source_package / "third_party" / "reBotArm_control_py"
+        ).is_dir():
+            return source_package
     return here.parents[3]
 
 
@@ -131,12 +137,25 @@ def _add_runtime_config(data: dict[str, Any]) -> None:
     n = len(arm_joints)
     gravity_config = data.get("gravity_compensation", {}) or {}
     control_config = data.get("control", {}) or {}
+    safety_config = data.get("safety", {}) or {}
+
+    protective_stop_mode = str(
+        safety_config.get("protective_stop_mode", "hold")
+    ).strip().lower()
+    if protective_stop_mode not in ("hold", "disable"):
+        raise ValueError(
+            "safety.protective_stop_mode must be 'hold' or 'disable'"
+        )
 
     data["_runtime"] = {
         "control": {
             "arm_control_mode": _arm_control_mode(data),
             "mit_kp": _control_gain(data, arm_joints, control_config, "mit_kp", "kp"),
             "mit_kd": _control_gain(data, arm_joints, control_config, "mit_kd", "kd"),
+        },
+        "trajectory": _trajectory_limits(data, arm_joints),
+        "safety": {
+            "protective_stop_mode": protective_stop_mode,
         },
         "gravity_compensation": {
             "kp": _gravity_gain(data, arm_joints, gravity_config, "kp"),
@@ -152,6 +171,67 @@ def _add_runtime_config(data: dict[str, Any]) -> None:
                 "gravity_compensation.tau_scale",
             ),
         }
+    }
+
+
+def _trajectory_limits(data: dict[str, Any], arm_joints: list[str]) -> dict[str, Any]:
+    """Resolve the conservative limits used by synchronized retiming."""
+
+    config = data.get("trajectory_limits", {}) or {}
+    joint_map = {str(joint.get("name")): joint for joint in data.get("joints", [])}
+    driver_velocities: list[float] = []
+    for name in arm_joints:
+        joint = joint_map.get(name)
+        if joint is None:
+            raise ValueError(f"groups.arm references unknown joint {name!r}")
+        driver_velocities.append(
+            float((joint.get("POS_VEL", {}) or {}).get("vlim", 1.0))
+        )
+
+    max_velocity = _runtime_vector(
+        config.get("max_velocity", driver_velocities),
+        len(arm_joints),
+        "trajectory_limits.max_velocity",
+    )
+    max_acceleration = _runtime_vector(
+        config.get("max_acceleration", max_velocity),
+        len(arm_joints),
+        "trajectory_limits.max_acceleration",
+    )
+    if any(not math.isfinite(value) or value <= 0.0 for value in max_velocity):
+        raise ValueError("trajectory_limits.max_velocity values must be > 0")
+    if any(
+        not math.isfinite(value) or value <= 0.0
+        for value in max_acceleration
+    ):
+        raise ValueError("trajectory_limits.max_acceleration values must be > 0")
+    if any(
+        configured > driver
+        for configured, driver in zip(max_velocity, driver_velocities)
+    ):
+        raise ValueError(
+            "trajectory_limits.max_velocity cannot exceed actuator POS_VEL.vlim"
+        )
+    safety_factor = float(config.get("safety_factor", 1.0))
+    if not math.isfinite(safety_factor) or not 0.0 < safety_factor <= 1.0:
+        raise ValueError("trajectory_limits.safety_factor must be in (0, 1]")
+    tracking_error_soft = float(config.get("tracking_error_soft", 0.05))
+    tracking_error_hard = float(config.get("tracking_error_hard", 0.15))
+    if (
+        not math.isfinite(tracking_error_soft)
+        or not math.isfinite(tracking_error_hard)
+        or tracking_error_soft < 0.0
+        or tracking_error_hard <= tracking_error_soft
+    ):
+        raise ValueError(
+            "trajectory_limits tracking errors must satisfy 0 <= soft < hard"
+        )
+    return {
+        "max_velocity": max_velocity,
+        "max_acceleration": max_acceleration,
+        "safety_factor": safety_factor,
+        "tracking_error_soft": tracking_error_soft,
+        "tracking_error_hard": tracking_error_hard,
     }
 
 

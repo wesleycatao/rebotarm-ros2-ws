@@ -1,0 +1,78 @@
+{
+  "active_filters": [
+    "detect_bright",
+    "detect_edge",
+    "min_area",
+    "max_area",
+    "min_aspect",
+    "max_aspect",
+    "min_solidity",
+    "min_extent",
+    "max_extent"
+  ],
+  "blur_kernel": 5,
+  "brightness_invert": false,
+  "brightness_threshold": 85,
+  "canny_high": 130,
+  "canny_low": 45,
+  "center_method": "moments",
+  "circle_min_circularity": 0.72,
+  "direction_method": "min_area_rect",
+  "direction_sense_method": "bright_end",
+  "draw_workspace_limit": true,
+  "edge_aperture_size": 3,
+  "edge_operation": 1,
+  "hsv_lower": [
+    0,
+    40,
+    40
+  ],
+  "hsv_upper": [
+    179,
+    255,
+    255
+  ],
+  "lying_aspect_ratio_threshold": 1.8,
+  "max_area_px": 18000.0,
+  "max_aspect_ratio": 6.0,
+  "max_extent": 0.85,
+  "min_area_px": 10000.0,
+  "min_aspect_ratio": 1.8,
+  "min_extent": 0.4,
+  "min_solidity": 0.85,
+  "morph_kernel": 9,
+  "morph_operation": 1,
+  "opencv_mode": "bright_or_edge",
+  "rgb_lower": [
+    0,
+    0,
+    0
+  ],
+  "rgb_upper": [
+    255,
+    255,
+    255
+  ],
+  "roi_margin_px": 45,
+  "shape_epsilon_ratio": 0.035,
+  "shape_filter": "object",
+  "square_aspect_tolerance": 0.22,
+  "use_workspace_mask": true,
+  "workspace_circle_pixel": [
+    724.0,
+    543.0,
+    434.40000000000003
+  ],
+  "workspace_limit_pixels": [
+    60.0,
+    70.0,
+    1388.0,
+    70.0,
+    1388.0,
+    1005.0,
+    60.0,
+    1005.0
+  ],
+  "workspace_limit_shape": "polygon",
+  "workspace_mask_margin_px": 0
+}

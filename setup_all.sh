@@ -37,9 +37,12 @@ if [[ "$UBUNTU_VERSION" == "22.04" ]]; then
     ROS_DISTRO="humble"
 elif [[ "$UBUNTU_VERSION" == "24.04" ]]; then
     ROS_DISTRO="jazzy"
+elif [[ "$UBUNTU_VERSION" == "26.04" ]]; then
+    ROS_DISTRO="lyrical"
 else
-    echo -e "${YELLOW}Aviso: Versão não testada ($UBUNTU_VERSION). Usando Humble.${NC}"
-    ROS_DISTRO="humble"
+    echo -e "${RED}Erro: versão do Ubuntu não suportada ($UBUNTU_VERSION).${NC}"
+    echo -e "${YELLOW}Use Ubuntu 22.04/Humble, 24.04/Jazzy ou 26.04/Lyrical.${NC}"
+    exit 1
 fi
 echo -e "ROS 2 distro: ${GREEN}${ROS_DISTRO}${NC}"
 echo ""
@@ -101,11 +104,6 @@ sudo apt install -y \
     ros-${ROS_DISTRO}-ros2-control \
     ros-${ROS_DISTRO}-ros2-controllers \
     ros-${ROS_DISTRO}-moveit-configs-utils \
-    ros-${ROS_DISTRO}-moveit-kinematics \
-    ros-${ROS_DISTRO}-moveit-planners-ompl \
-    ros-${ROS_DISTRO}-moveit-ros-move-group \
-    ros-${ROS_DISTRO}-moveit-ros-visualization \
-    ros-${ROS_DISTRO}-moveit-simple-controller-manager \
     ros-${ROS_DISTRO}-tf-transformations \
     ros-${ROS_DISTRO}-tf2-ros \
     ros-${ROS_DISTRO}-robot-state-publisher \
@@ -122,8 +120,12 @@ sudo apt install -y \
     ros-${ROS_DISTRO}-geometry-msgs \
     ros-${ROS_DISTRO}-std-msgs \
     ros-${ROS_DISTRO}-std-srvs \
-    ros-${ROS_DISTRO}-builtin-interfaces \
-    2>/dev/null || echo -e "${YELLOW}Alguns pacotes podem não estar disponíveis, continuando...${NC}"
+    ros-${ROS_DISTRO}-builtin-interfaces
+
+if [[ "$ROS_DISTRO" == "lyrical" ]]; then
+    echo -e "${YELLOW}Aviso: o repositório ROS Lyrical atual não publica os pacotes C++ principais do MoveIt.${NC}"
+    echo -e "${YELLOW}O workspace será compilado sem o clearance_service_node até esses pacotes estarem disponíveis.${NC}"
+fi
 
 echo -e "${GREEN}✓ Dependências ROS instaladas${NC}"
 echo ""
@@ -238,8 +240,12 @@ source /opt/ros/${ROS_DISTRO}/setup.bash
 if [ ! -f /etc/ros/rosdep/sources.list.d/20-default.list ]; then
     sudo rosdep init 2>/dev/null || true
 fi
-rosdep update 2>/dev/null || true
-rosdep install --from-paths src --ignore-src -r -y 2>/dev/null || true
+rosdep update
+ROSDEP_ARGS=(--from-paths src --ignore-src -r -y)
+if [[ "$ROS_DISTRO" == "lyrical" ]]; then
+    ROSDEP_ARGS+=(--skip-keys ament_python)
+fi
+rosdep install "${ROSDEP_ARGS[@]}"
 
 # Build
 colcon build --symlink-install 2>&1

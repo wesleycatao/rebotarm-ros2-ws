@@ -25,6 +25,9 @@ env/
 
 # Runtime/local files
 .exe
+*.deb
+.agents/
+.codex/
 home/
 src/rebotarmcontroller/third_party/reBotArm_control_py/
 .ros/

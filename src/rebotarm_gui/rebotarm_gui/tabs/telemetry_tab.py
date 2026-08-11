@@ -2,11 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Dict
-
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QHBoxLayout,
     QHeaderView,
     QLabel,
     QTableWidget,
@@ -26,22 +23,24 @@ class TelemetryTab(QWidget):
         # ---- Joint states table ----
         self._joint_tbl = QTableWidget(0, 4)
         self._joint_tbl.setHorizontalHeaderLabels(["Junta", "Posição (rad)", "Velocidade", "Esforço"])
+        self._joint_tbl.setAccessibleName("Telemetria de posição, velocidade e esforço das juntas")
         self._joint_tbl.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self._joint_tbl.verticalHeader().setVisible(False)
         self._joint_tbl.setEditTriggers(QTableWidget.NoEditTriggers)
         self._joint_tbl.setAlternatingRowColors(True)
-        self._joint_tbl.verticalHeader().setDefaultSectionSize(46)
+        self._joint_tbl.verticalHeader().setDefaultSectionSize(32)
 
         # ---- Motor detail table ----
         self._detail_tbl = QTableWidget(0, 6)
         self._detail_tbl.setHorizontalHeaderLabels(
             ["Junta", "Posição", "Velocidade", "Esforço", "Temp (C)", "Erro"]
         )
+        self._detail_tbl.setAccessibleName("Telemetria detalhada dos motores")
         self._detail_tbl.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self._detail_tbl.verticalHeader().setVisible(False)
         self._detail_tbl.setEditTriggers(QTableWidget.NoEditTriggers)
         self._detail_tbl.setAlternatingRowColors(True)
-        self._detail_tbl.verticalHeader().setDefaultSectionSize(46)
+        self._detail_tbl.verticalHeader().setDefaultSectionSize(32)
 
         lay = QVBoxLayout(self)
         lay.setContentsMargins(18, 18, 18, 18)
@@ -74,7 +73,7 @@ class TelemetryTab(QWidget):
 
         pos = getattr(msg, "position", 0.0)
         vel = getattr(msg, "velocity", 0.0)
-        eff = getattr(msg, "effort", 0.0)
+        eff = getattr(msg, "torque", getattr(msg, "effort", 0.0))
         temp = getattr(msg, "temperature", getattr(msg, "temp", None))
         err = getattr(msg, "error", getattr(msg, "fault", None))
 

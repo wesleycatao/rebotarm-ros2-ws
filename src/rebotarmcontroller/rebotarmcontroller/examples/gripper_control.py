@@ -83,7 +83,7 @@ class DemoGripperControl(Node):
             self.get_logger().error(f"{label} failed: no response")
             return False
         if not result.success:
-            self.get_logger().warn(
+            self.get_logger().warning(
                 f"{label} not reached, current={result.reached_position:.3f}rad"
             )
             return False

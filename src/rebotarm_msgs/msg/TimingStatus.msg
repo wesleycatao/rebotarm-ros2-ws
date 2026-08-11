@@ -1,0 +1,20 @@
+std_msgs/Header header
+bool watchdog_enabled
+
+float64 control_nominal_rate_hz
+float64 control_last_period_ms
+float64 control_last_execution_ms
+float64 control_max_jitter_ms
+float64 control_p95_jitter_ms
+float64 control_p99_jitter_ms
+uint64 control_deadline_misses
+uint64 control_lost_cycles
+
+float64 safety_nominal_rate_hz
+float64 safety_last_period_ms
+float64 safety_last_execution_ms
+float64 safety_max_jitter_ms
+float64 safety_p95_jitter_ms
+float64 safety_p99_jitter_ms
+uint64 safety_deadline_misses
+uint64 safety_lost_cycles

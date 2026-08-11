@@ -8,3 +8,18 @@ reBotArmController:
     channel: ""
     frame_id: base_link
     ee_frame_id: end_link
+    deadline_watchdog_enabled: true
+    # A valid signed GUI lease switches the controller permanently to
+    # fail-closed authorization until restart. Set true to require a lease
+    # immediately at startup.
+    authorization_required: false
+    authorization_secret_path: ""
+    # Override dinâmico do relógio comum da trajetória. A rampa é também
+    # limitada online pela aceleração disponível de cada junta.
+    speed_override_minimum: 0.05
+    speed_override_increase_rate: 0.50
+    speed_override_decrease_rate: 2.00
+    control_loop_deadline_ms: 6.0
+    control_loop_deadline_violations: 3
+    safety_monitor_deadline_ms: 30.0
+    timing_diagnostics_rate: 1.0

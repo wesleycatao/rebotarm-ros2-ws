@@ -1,5 +1,6 @@
 import os
 from importlib.machinery import SourceFileLoader
+from ament_index_python.packages import PackageNotFoundError, get_package_prefix
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, EmitEvent, OpaqueFunction, RegisterEventHandler
 from launch.conditions import IfCondition
@@ -8,7 +9,6 @@ from launch.events import Shutdown
 from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
 from launch_ros.substitutions import FindPackageShare
-from moveit_configs_utils import MoveItConfigsBuilder
 
 moveit_parameters = SourceFileLoader(
     "moveit_launch_common",
@@ -51,6 +51,14 @@ def generate_launch_description():
 
 def _launch_setup(context, *args, **kwargs):
     del args, kwargs
+    MoveItConfigsBuilder = _load_moveit_configs_builder()
+    _require_package(
+        "moveit_ros_move_group",
+        "The current ROS Lyrical apt repository does not publish this package; "
+        "install MoveIt from source or use a ROS distro with the full MoveIt stack.",
+    )
+    _require_clearance_service()
+
     model = LaunchConfiguration("model").perform(context).strip().lower()
     is_rs = model == "rs"
     arm_namespace = LaunchConfiguration("arm_namespace")
@@ -84,6 +92,22 @@ def _launch_setup(context, *args, **kwargs):
         executable="move_group",
         output="screen",
         parameters=[moveit_params],
+        remappings=[("/joint_states", ["/", arm_namespace, "/joint_states"])],
+    )
+
+    clearance_service_node = Node(
+        package="rebotarm_moveit_config",
+        executable="clearance_service_node",
+        name="rebotarm_clearance_service",
+        output="screen",
+        parameters=[
+            moveit_params,
+            {
+                "joint_states_topic": "/joint_states",
+                "planning_scene_topic": "/monitored_planning_scene",
+                "get_planning_scene_service": "/get_planning_scene",
+            },
+        ],
         remappings=[("/joint_states", ["/", arm_namespace, "/joint_states"])],
     )
 
@@ -126,6 +150,7 @@ def _launch_setup(context, *args, **kwargs):
         static_tf_node,
         robot_state_publisher_node,
         move_group_node,
+        clearance_service_node,
         rviz_node,
         RegisterEventHandler(
             OnProcessExit(
@@ -136,3 +161,36 @@ def _launch_setup(context, *args, **kwargs):
             )
         ),
     ]
+
+
+def _load_moveit_configs_builder():
+    try:
+        from moveit_configs_utils import MoveItConfigsBuilder
+    except ModuleNotFoundError as exc:
+        raise RuntimeError(
+            "Missing moveit_configs_utils. Install ros-lyrical-moveit-configs-utils "
+            "or source a workspace that provides it before launching MoveIt."
+        ) from exc
+    return MoveItConfigsBuilder
+
+
+def _require_package(package_name, hint):
+    try:
+        get_package_prefix(package_name)
+    except PackageNotFoundError as exc:
+        raise RuntimeError(f"Missing required ROS package '{package_name}'. {hint}") from exc
+
+
+def _require_clearance_service():
+    executable = os.path.join(
+        get_package_prefix("rebotarm_moveit_config"),
+        "lib",
+        "rebotarm_moveit_config",
+        "clearance_service_node",
+    )
+    if not os.path.exists(executable):
+        raise RuntimeError(
+            "clearance_service_node was not built. MoveIt C++ packages "
+            "moveit_core and moveit_ros_planning are unavailable in this environment, "
+            "so trajectory clearance checking cannot run."
+        )

@@ -1,0 +1,8 @@
+string profile_path
+string mode
+uint32 violation_samples
+string active_step_id
+float64 derivative_limit
+---
+bool success
+string message

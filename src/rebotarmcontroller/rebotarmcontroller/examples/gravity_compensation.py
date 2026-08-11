@@ -88,11 +88,11 @@ def main() -> None:
             try:
                 _call_trigger(node, safe_home_client, "safe_home", timeout_sec=35.0)
             except Exception as exc:
-                node.get_logger().warn(f"safe_home cleanup failed: {exc}")
+                node.get_logger().warning(f"safe_home cleanup failed: {exc}")
             try:
                 _call_trigger(node, disable_client, "disable")
             except Exception as exc:
-                node.get_logger().warn(f"disable cleanup failed: {exc}")
+                node.get_logger().warning(f"disable cleanup failed: {exc}")
         signal.signal(signal.SIGINT, old_sigint)
         signal.signal(signal.SIGTERM, old_sigterm)
         node.destroy_node()

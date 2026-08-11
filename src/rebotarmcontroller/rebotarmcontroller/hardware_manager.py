@@ -8,6 +8,7 @@ import numpy as np
 
 from .conversions import fk_to_pose
 from .hardware_config import resolve_hardware_config
+from .speed_override import DynamicSpeedOverride, SpeedOverrideSnapshot
 
 _GRIPPER_GOAL_TOLERANCE_RAD = 0.12
 _GRIPPER_CLOSED_POSITION = 0.0
@@ -30,6 +31,10 @@ class HardwareManager:
         hardware_config: str | None = None,
         model: str = "",
         channel: str = "",
+        *,
+        speed_override_minimum: float = 0.05,
+        speed_override_increase_rate: float = 0.50,
+        speed_override_decrease_rate: float = 2.00,
     ) -> None:
         self._cmd_lock = threading.RLock()
         hardware_config_path, hardware_data = resolve_hardware_config(
@@ -46,9 +51,15 @@ class HardwareManager:
             load_robot_model,
             pad_q_for_model,
         )
+        from reBotArm_control_py.trajectory import (
+            retime_joint_trajectory,
+            tracking_speed_scale,
+        )
 
         self._compute_fk = compute_fk
         self._pad_q_for_model = pad_q_for_model
+        self._retime_joint_trajectory = retime_joint_trajectory
+        self._tracking_speed_scale = tracking_speed_scale
 
         runtime_config = hardware_data["_runtime"]
         control_runtime = runtime_config["control"]
@@ -66,6 +77,42 @@ class HardwareManager:
         self._endpos_ctrl = RebotArmEndPose(
             self._robot,
             arm_control_mode=self._arm_control_mode,
+        )
+        trajectory_runtime = runtime_config["trajectory"]
+        self._trajectory_max_velocities = np.asarray(
+            trajectory_runtime["max_velocity"], dtype=np.float64
+        )
+        self._trajectory_max_accelerations = np.asarray(
+            trajectory_runtime["max_acceleration"], dtype=np.float64
+        )
+        self._trajectory_safety_factor = float(
+            trajectory_runtime["safety_factor"]
+        )
+        self._speed_override = DynamicSpeedOverride(
+            self._trajectory_max_accelerations,
+            safety_factor=self._trajectory_safety_factor,
+            minimum=speed_override_minimum,
+            increase_rate_per_s=speed_override_increase_rate,
+            decrease_rate_per_s=speed_override_decrease_rate,
+        )
+        self._tracking_error_soft = float(
+            trajectory_runtime["tracking_error_soft"]
+        )
+        self._tracking_error_hard = float(
+            trajectory_runtime["tracking_error_hard"]
+        )
+        self._endpos_ctrl.set_trajectory_limits(
+            self._trajectory_max_velocities,
+            self._trajectory_max_accelerations,
+            self._trajectory_safety_factor,
+            self._tracking_error_soft,
+            self._tracking_error_hard,
+        )
+        self._endpos_ctrl.set_external_speed_scale_provider(
+            self.advance_dynamic_speed_override
+        )
+        self._protective_stop_mode = str(
+            runtime_config["safety"]["protective_stop_mode"]
         )
 
         self._gripper_name = (
@@ -97,6 +144,7 @@ class HardwareManager:
         self._enabled = False
         self._control_output_enabled = False
         self._state_machine = "IDLE"
+        self._protective_stop_latched = False
         self._error_codes: list[str] = []
         self._gravity_comp_active = False
         self._gravity_comp_q_last: np.ndarray | None = None
@@ -109,6 +157,59 @@ class HardwareManager:
     @property
     def joint_names(self) -> list[str]:
         return list(self._arm_group.joint_names)
+
+    def trajectory_limits_snapshot(self) -> dict[str, object]:
+        """Return the authoritative limits used by synchronized retiming."""
+
+        return {
+            "joint_names": self.joint_names,
+            "max_velocity": [
+                float(value) for value in self._trajectory_max_velocities
+            ],
+            "max_acceleration": [
+                float(value) for value in self._trajectory_max_accelerations
+            ],
+            "safety_factor": float(self._trajectory_safety_factor),
+            "dynamic_speed_override": {
+                "supported": True,
+                "minimum": self._speed_override.minimum,
+                "maximum": self._speed_override.maximum,
+                "increase_rate_per_s": self._speed_override.increase_rate_per_s,
+                "decrease_rate_per_s": self._speed_override.decrease_rate_per_s,
+            },
+        }
+
+    @_locked
+    def set_dynamic_speed_override(self, value: object) -> tuple[bool, float, str]:
+        """Set the common-clock target, settling immediately while idle."""
+
+        valid, requested, message = self._speed_override.request(value)
+        if self._state_machine != "TRAJ_RUNNING":
+            self._speed_override.settle_while_idle()
+        return valid, requested, message
+
+    def dynamic_speed_override_snapshot(self) -> SpeedOverrideSnapshot:
+        return self._speed_override.snapshot()
+
+    @property
+    def minimum_dynamic_speed_override(self) -> float:
+        return self._speed_override.minimum
+
+    def advance_dynamic_speed_override(
+        self,
+        elapsed_s: float,
+        path_velocities=None,
+        path_accelerations=None,
+        tracking_scale: float = 1.0,
+    ) -> float:
+        """Advance and return the path-preserving external clock scale."""
+
+        return self._speed_override.advance(
+            elapsed_s,
+            path_velocities=path_velocities,
+            path_accelerations=path_accelerations,
+            tracking_scale=tracking_scale,
+        )
 
     @property
     def mode(self) -> str:
@@ -134,6 +235,41 @@ class HardwareManager:
     def error_codes(self) -> list[str]:
         return list(self._error_codes)
 
+    @property
+    def protective_stop_active(self) -> bool:
+        return bool(self._protective_stop_latched)
+
+    def configure_control_loop_watchdog(
+        self,
+        *,
+        deadline_sec: float,
+        violation_limit: int,
+        on_fault,
+    ) -> None:
+        """Configure the SDK timing watchdog used by every arm control loop."""
+        self._robot.configure_control_loop_watchdog(
+            deadline_sec=deadline_sec,
+            violation_limit=violation_limit,
+            on_fault=on_fault,
+        )
+
+    def control_loop_timing_snapshot(self):
+        """Return an immutable snapshot of actuator-loop timing metrics."""
+        return self._robot.control_loop_timing_snapshot()
+
+    def reset_control_loop_timing_runtime(self) -> None:
+        self._robot.reset_control_loop_timing_runtime()
+
+    @_locked
+    def set_error_condition(self, code: str, active: bool) -> None:
+        value = str(code).strip()
+        if not value:
+            return
+        if active and value not in self._error_codes:
+            self._error_codes.append(value)
+        elif not active:
+            self._error_codes = [item for item in self._error_codes if item != value]
+
     @_locked
     def set_state_machine(self, state: str) -> None:
         if state not in (
@@ -142,8 +278,12 @@ class HardwareManager:
             "LOWLEVEL_STREAMING",
             "GRAVITY_COMP",
             "SAFE_HOMING",
+            "PROTECTIVE_STOP",
         ):
             raise ValueError(f"unsupported state machine value: {state}")
+        if self._protective_stop_latched and state != "PROTECTIVE_STOP":
+            self._state_machine = "PROTECTIVE_STOP"
+            return
         self._state_machine = state
 
     # ------------------------------------------------------------------
@@ -176,12 +316,19 @@ class HardwareManager:
         if not self._connected:
             return
         try:
-            self.safe_home()
-            with self._cmd_lock:
-                self._robot.stop_control_loop()
+            if self._protective_stop_latched:
+                with self._cmd_lock:
+                    self._control_output_enabled = False
+                    self._robot.stop_control_loop()
+                    self._robot.disable_all()
+                    self._enabled = False
+            else:
+                self.safe_home()
+                with self._cmd_lock:
+                    self._robot.stop_control_loop()
 
-            if disable_after_safe_home:
-                self.disable()
+                if disable_after_safe_home:
+                    self.disable()
 
             with self._cmd_lock:
                 self._robot.disconnect()
@@ -218,6 +365,8 @@ class HardwareManager:
 
     @_locked
     def set_joint_position_target(self, positions) -> None:
+        if self._protective_stop_latched:
+            raise RuntimeError("rejecting joint target during protective stop")
         if self._state_machine == "SAFE_HOMING":
             raise RuntimeError("rejecting joint target during safe home")
         target = np.asarray(positions, dtype=np.float64).reshape(-1)
@@ -231,6 +380,8 @@ class HardwareManager:
 
     @_locked
     def start_endpos_control(self) -> None:
+        if self._protective_stop_latched:
+            raise RuntimeError("reset safety fault before enabling motion")
         if self._gravity_comp_active:
             raise RuntimeError("stop gravity compensation before starting endpos control")
         if self._state_machine in ("SAFE_HOMING", "TRAJ_RUNNING"):
@@ -258,10 +409,14 @@ class HardwareManager:
         self._robot.stop_control_loop()
         self._robot.disable_all()
         self._enabled = False
-        self.set_state_machine("IDLE")
+        self.set_state_machine(
+            "PROTECTIVE_STOP" if self._protective_stop_latched else "IDLE"
+        )
 
     def safe_home(self) -> None:
         with self._cmd_lock:
+            if self._protective_stop_latched:
+                raise RuntimeError("reset safety fault before safe_home")
             self.stop_motion()
             self.set_state_machine("IDLE")
             if self._gravity_comp_active:
@@ -297,6 +452,8 @@ class HardwareManager:
 
     @_locked
     def set_zero(self, joint_name: str = "") -> bool:
+        if self._protective_stop_latched:
+            raise RuntimeError("reset safety fault before set_zero")
         self.stop_motion()
         self._robot.stop_control_loop()
         self._endpos_ctrl._running = False
@@ -320,6 +477,8 @@ class HardwareManager:
         kd: float,
         tau: float,
     ) -> None:
+        if self._protective_stop_latched:
+            raise RuntimeError("rejecting MIT command during protective stop")
         index = self._joint_index(joint_name)
         self._begin_lowlevel_streaming("mit")
         q = self._arm_group.get_positions(request_feedback=True)
@@ -349,6 +508,8 @@ class HardwareManager:
         pos: float,
         vlim: float,
     ) -> None:
+        if self._protective_stop_latched:
+            raise RuntimeError("rejecting pos_vel command during protective stop")
         index = self._joint_index(joint_name)
         self._begin_lowlevel_streaming("pos_vel")
         q = self._arm_group.get_positions(request_feedback=True)
@@ -369,14 +530,27 @@ class HardwareManager:
 
     def _require_idle(self, what: str) -> None:
         state = self._state_machine
-        if state in ("TRAJ_RUNNING", "GRAVITY_COMP", "SAFE_HOMING"):
+        if state in ("TRAJ_RUNNING", "GRAVITY_COMP", "SAFE_HOMING", "PROTECTIVE_STOP"):
             raise RuntimeError(f"rejecting {what} in state {state}")
 
     @_locked
     def begin_trajectory_stream(self) -> None:
         self._require_idle("trajectory stream")
         self.start_endpos_control()
+        # The trajectory advances below the safety-factor-adjusted ceiling;
+        # keep the actuator vlim at the configured operational maximum rather
+        # than its much higher driver emergency limit.
+        self._endpos_ctrl._vlim_override = (
+            self._trajectory_max_velocities.copy()
+        )
         self.set_state_machine("TRAJ_RUNNING")
+
+    @_locked
+    def end_trajectory_stream(self) -> None:
+        self._endpos_ctrl._qd_target[:] = 0.0
+        self._endpos_ctrl._vlim_override = None
+        if self._state_machine not in ("SAFE_HOMING", "PROTECTIVE_STOP"):
+            self.set_state_machine("IDLE")
 
     def move_to_pose_traj(
         self, x, y, z, roll, pitch, yaw, duration: float
@@ -389,6 +563,7 @@ class HardwareManager:
             )
         finally:
             if not ok and self._state_machine == "TRAJ_RUNNING":
+                self._endpos_ctrl._vlim_override = None
                 self.set_state_machine("IDLE")
         return ok
 
@@ -399,13 +574,30 @@ class HardwareManager:
         ok = self._endpos_ctrl.move_to_ik(x, y, z, roll, pitch, yaw)
         return bool(ok), [float(v) for v in self._endpos_ctrl._q_target]
 
-    def get_joint_status_codes(self) -> list[int]:
+    @_locked
+    def solve_pose_ik(self, x, y, z, roll, pitch, yaw) -> tuple[bool, list[float]]:
+        """Solve IK for preflight without modifying the commanded arm target."""
+        if self._protective_stop_latched:
+            raise RuntimeError("reset safety fault before IK preflight")
+        ok, solution = self._endpos_ctrl.solve_ik(
+            x, y, z, roll, pitch, yaw
+        )
+        return bool(ok), [float(value) for value in solution]
+
+    def get_joint_status_codes(self, *, strict: bool = False) -> list[int]:
         codes: list[int] = []
         for name in self.joint_names:
             try:
                 st = self._robot._motor_map[name].get_state()
-                codes.append(int(st.status_code if st is not None else 0))
+                if st is None:
+                    if strict:
+                        raise RuntimeError(f"no actuator state for {name}")
+                    codes.append(0)
+                else:
+                    codes.append(int(st.status_code))
             except Exception:
+                if strict:
+                    raise
                 codes.append(0)
         return codes
 
@@ -415,6 +607,10 @@ class HardwareManager:
 
     @_locked
     def start_gravity_compensation(self) -> None:
+        if self._protective_stop_latched:
+            raise RuntimeError(
+                "reset safety fault before starting gravity compensation"
+            )
         if self._state_machine in ("TRAJ_RUNNING", "SAFE_HOMING"):
             raise RuntimeError(
                 f"rejecting gravity compensation in state {self._state_machine}"
@@ -604,6 +800,8 @@ class HardwareManager:
         self._gripper_target_position = None
 
     def _begin_gripper_command(self, *, allow_endpos: bool = False) -> None:
+        if self._protective_stop_latched:
+            raise RuntimeError("rejecting gripper command during protective stop")
         if not self._enabled:
             raise RuntimeError("rejecting gripper command while arm is disabled")
         if self._gravity_comp_active or self.state_machine == "GRAVITY_COMP":
@@ -627,6 +825,8 @@ class HardwareManager:
     # ------------------------------------------------------------------
 
     def _begin_lowlevel_streaming(self, required_mode: str) -> None:
+        if self._protective_stop_latched:
+            raise RuntimeError("rejecting low-level command during protective stop")
         if not self._enabled:
             raise RuntimeError("rejecting low-level command while arm is disabled")
         if self._gravity_comp_active or self.state_machine == "GRAVITY_COMP":
@@ -703,6 +903,137 @@ class HardwareManager:
 
     def motion_active(self) -> bool:
         return bool(self._endpos_ctrl._moving)
+
+    def get_planned_trajectory(self) -> list[np.ndarray]:
+        """Return a copy of the last planned end-pose trajectory in joint space.
+
+        Each element is a numpy array of arm joint positions. Empty list if no
+        trajectory is currently available.
+        """
+        traj = getattr(self._endpos_ctrl, "_traj", None)
+        if traj is None:
+            return []
+        return [np.array(p, dtype=np.float64, copy=True) for p in traj]
+
+    def get_planned_duration(self) -> float:
+        """Return the retimed duration of the active end-pose trajectory."""
+
+        return float(getattr(self._endpos_ctrl, "_planned_duration", 0.0))
+
+    def get_retime_summary(self) -> tuple[float, int | None]:
+        """Return ``(scale_factor, limiting_joint_index)`` for the last plan."""
+
+        return (
+            float(getattr(self._endpos_ctrl, "_retime_scale", 1.0)),
+            getattr(self._endpos_ctrl, "_limiting_joint", None),
+        )
+
+    def get_motion_error(self) -> str | None:
+        error = getattr(self._endpos_ctrl, "_motion_error", None)
+        return str(error) if error else None
+
+    def retime_joint_trajectory(self, positions, times):
+        """Apply the controller's synchronized limits to a joint path."""
+
+        return self._retime_joint_trajectory(
+            positions,
+            times,
+            self._trajectory_max_velocities,
+            self._trajectory_max_accelerations,
+            safety_factor=self._trajectory_safety_factor,
+        )
+
+    def trajectory_speed_scale(self, commanded, actual) -> float:
+        """Return the common online trajectory clock rate from tracking error."""
+
+        return self._tracking_speed_scale(
+            commanded,
+            actual,
+            self._tracking_error_soft,
+            self._tracking_error_hard,
+        )
+
+    @property
+    def trajectory_tracking_tolerance(self) -> float:
+        return self._tracking_error_soft
+
+    def get_endpos_target(self) -> np.ndarray | None:
+        """Return a copy of the current end-pose joint target, if available."""
+        target = getattr(self._endpos_ctrl, "_q_target", None)
+        if target is None:
+            return None
+        return np.array(target, dtype=np.float64, copy=True)
+
+    @_locked
+    def enter_protective_stop(self, reason: str) -> None:
+        if self._protective_stop_latched:
+            if reason and reason not in self._error_codes:
+                self._error_codes.append(reason)
+            return
+
+        # Latch first so every command path closes before the stop sequence.
+        self._protective_stop_latched = True
+        self._state_machine = "PROTECTIVE_STOP"
+        self.stop_motion()
+        self._endpos_ctrl._running = False
+        try:
+            self._robot.stop_control_loop()
+        except Exception:
+            pass
+        self._gravity_comp_active = False
+        self._gravity_comp_q_last = None
+
+        if self._protective_stop_mode == "hold" and self._enabled:
+            try:
+                # Cancel the common trajectory clock and hold the measured
+                # position with zero target velocity. This avoids continuing
+                # along a path after a collision while also avoiding an
+                # uncontrolled gravity drop.
+                current = self.get_joint_positions(request=True).copy()
+                self._start_endpos_loop(target=current)
+            except Exception:
+                # If a controlled hold cannot be established, remove drive
+                # output instead of leaving the last motion command active.
+                self._control_output_enabled = False
+                self._endpos_ctrl._running = False
+                try:
+                    self._robot.stop_control_loop()
+                    self._robot.disable_all()
+                finally:
+                    self._enabled = False
+        else:
+            self._control_output_enabled = False
+            try:
+                self._robot.disable_all()
+            finally:
+                self._enabled = False
+
+        if reason and reason not in self._error_codes:
+            self._error_codes.append(reason)
+        self._state_machine = "PROTECTIVE_STOP"
+
+    @_locked
+    def reset_protective_stop(self) -> None:
+        if not self._protective_stop_latched:
+            self._error_codes = [
+                code
+                for code in self._error_codes
+                if not code.startswith(("TORQUE_", "SAFETY_"))
+            ]
+            return
+        self._error_codes = [
+            code
+            for code in self._error_codes
+            if not code.startswith(("TORQUE_", "SAFETY_"))
+        ]
+        if self._enabled:
+            current = self.get_joint_positions(request=True).copy()
+            self._endpos_ctrl._q_target[:] = current
+            self._endpos_ctrl._qd_target[:] = 0.0
+            if not self.control_loop_active:
+                self._start_endpos_loop(target=current)
+        self._protective_stop_latched = False
+        self.set_state_machine("IDLE")
 
     def _endpos_loop_cb(self, robot, dt: float) -> None:
         del dt

@@ -1,14 +1,25 @@
 from __future__ import annotations
 
 from rebotarm_msgs.srv import (
+    CheckTorqueProfile,
     GripperCommand,
     MoveToPoseIK,
+    SetSafetyStep,
     SetGripper,
+    SetTorqueProfile,
     SetZero,
 )
 from std_srvs.srv import Trigger
 
 from .conversions import pose_to_xyz_rpy
+from .authorization import (
+    CAP_EXECUTE_RELEASED,
+    CAP_MANUAL_MOTION,
+    CAP_RAW_CONTROL,
+    CAP_SAFETY_CONFIG,
+    CAP_SAFETY_RESET,
+    CAP_STOP,
+)
 
 
 class ArmServices:
@@ -37,6 +48,10 @@ class ArmServices:
             (SetGripper, "gripper/set", self.set_gripper, node.reentrant_group),
             (GripperCommand, "gripper/open", self.open_gripper, node.slow_group),
             (GripperCommand, "gripper/close", self.close_gripper, node.slow_group),
+            (SetTorqueProfile, "safety/set_torque_profile", self.set_torque_profile, node.slow_group),
+            (SetSafetyStep, "safety/set_step", self.set_safety_step, node.reentrant_group),
+            (CheckTorqueProfile, "safety/check_torque_profile", self.check_torque_profile, node.reentrant_group),
+            (Trigger, "safety/reset_fault", self.reset_safety_fault, node.slow_group),
         )
         for srv_type, name, handler, group in services:
             node.create_service(
@@ -46,8 +61,17 @@ class ArmServices:
                 callback_group=group,
             )
 
-    def _run(self, response, action, success_message: str, *, read_hardware=True):
+    def _run(
+        self,
+        response,
+        action,
+        success_message: str,
+        *,
+        read_hardware=True,
+        capability=CAP_MANUAL_MOTION,
+    ):
         try:
+            self._node.authorization.require(capability)
             action()
             response.success = True
             response.message = success_message
@@ -65,7 +89,13 @@ class ArmServices:
             self._hardware.stop_gravity_compensation()
             self._hardware.disable()
 
-        return self._run(response, action, "disabled", read_hardware=False)
+        return self._run(
+            response,
+            action,
+            "disabled",
+            read_hardware=False,
+            capability=CAP_STOP,
+        )
 
     def safe_home(self, _request, response):
         return self._run(response, self._hardware.safe_home, "safe_home complete")
@@ -84,21 +114,90 @@ class ArmServices:
             "gravity compensation stopped",
         )
 
+    def reset_safety_fault(self, _request, response):
+        return self._run(
+            response,
+            self._node.reset_safety_fault,
+            "safety fault reset",
+            capability=CAP_SAFETY_RESET,
+        )
+
+    def set_torque_profile(self, request, response):
+        try:
+            self._node.authorization.require(CAP_SAFETY_CONFIG)
+            response.message = self._node.set_torque_profile(
+                request.profile_path,
+                request.mode,
+                int(request.violation_samples or 3),
+                request.active_step_id,
+                float(getattr(request, "derivative_limit", 0.0) or 0.0),
+            )
+            response.success = True
+        except Exception as exc:
+            response.success = False
+            response.message = str(exc)
+        self._node.publish_arm_status()
+        return response
+
+    def set_safety_step(self, request, response):
+        try:
+            self._node.authorization.require(CAP_EXECUTE_RELEASED)
+            self._node.set_torque_profile_step(
+                request.step_id,
+                float(request.payload_kg),
+            )
+            response.success = True
+            response.message = (
+                f"active safety step={request.step_id or 'default'} "
+                f"payload={float(request.payload_kg):.3f}kg"
+            )
+        except Exception as exc:
+            response.success = False
+            response.message = str(exc)
+        return response
+
+    def check_torque_profile(self, request, response):
+        try:
+            severity, results = self._node.evaluate_current_torque(
+                request.phase,
+                request.step_id,
+            )
+            response.success = True
+            response.severity = severity
+            issues = [item.message() for item in results if item.status != "OK"]
+            response.message = "; ".join(issues[:3]) if issues else "OK"
+            response.joint_names = [item.joint_name for item in results]
+            response.torque = [float(item.torque) for item in results]
+            response.warn_min = [float(item.warn_min) for item in results]
+            response.warn_max = [float(item.warn_max) for item in results]
+            response.fail_min = [float(item.fail_min) for item in results]
+            response.fail_max = [float(item.fail_max) for item in results]
+            response.status = [item.status for item in results]
+        except Exception as exc:
+            response.success = False
+            response.severity = "FAIL"
+            response.message = str(exc)
+        return response
+
     def set_zero(self, request, response):
         def action():
             self._hardware.stop_gravity_compensation()
             if not self._hardware.set_zero(request.joint_name):
                 raise RuntimeError("set_zero failed")
 
-        return self._run(response, action, "set_zero complete")
+        return self._run(
+            response, action, "set_zero complete", capability=CAP_RAW_CONTROL
+        )
 
     def move_to_pose_ik(self, request, response):
         try:
             self._hardware.stop_gravity_compensation()
             x, y, z, roll, pitch, yaw = pose_to_xyz_rpy(request.target_pose)
-            ok, q_solution = self._hardware.move_to_pose_ik(x, y, z, roll, pitch, yaw)
+            ok, q_solution = self._hardware.solve_pose_ik(
+                x, y, z, roll, pitch, yaw
+            )
             response.success = ok
-            response.message = "IK target accepted" if ok else "IK failed"
+            response.message = "IK solution found" if ok else "IK failed"
             response.q_solution = q_solution
         except Exception as exc:
             self._hardware.hold_current_position()
@@ -110,6 +209,7 @@ class ArmServices:
 
     def set_gripper(self, request, response):
         try:
+            self._node.authorization.require(CAP_MANUAL_MOTION)
             reached, reached_position = self._hardware.set_gripper_position(
                 request.position,
             )
@@ -134,6 +234,7 @@ class ArmServices:
 
     def _move_gripper(self, request, response, default_target: float, label: str):
         try:
+            self._node.authorization.require(CAP_MANUAL_MOTION)
             target = (
                 default_target if request.position == 0.0 else float(request.position)
             )

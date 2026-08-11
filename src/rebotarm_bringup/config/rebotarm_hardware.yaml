@@ -28,6 +28,19 @@ models:
         arm_control_mode: posvel
         mit_kp: [120.0, 120.0, 120.0, 18.0, 18.0, 18.0]
         mit_kd: [8.0, 8.0, 8.0, 2.0, 2.0, 2.0]
+      # Safe operational limits used by the path-preserving synchronized
+      # retimer.  They intentionally match MoveIt's joint_limits.yaml and stay
+      # below the actuator driver's emergency velocity ceiling.
+      trajectory_limits:
+        max_velocity: [1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
+        max_acceleration: [1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
+        safety_factor: 0.9
+        tracking_error_soft: 0.05
+        tracking_error_hard: 0.15
+      safety:
+        # "hold" cancels the path and holds the measured position. Use
+        # "disable" only when the mechanical design cannot fall under gravity.
+        protective_stop_mode: hold
       gravity_compensation:
         kp: 2.0
         kd: 1.5
@@ -53,6 +66,14 @@ models:
         arm_control_mode: mit
         mit_kp: [50.0, 150.0, 150.0, 50.0, 50.0, 50.0]
         mit_kd: [3.0, 10.0, 10.0, 5.0, 4.0, 4.0]
+      trajectory_limits:
+        max_velocity: [1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
+        max_acceleration: [1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
+        safety_factor: 0.9
+        tracking_error_soft: 0.05
+        tracking_error_hard: 0.15
+      safety:
+        protective_stop_mode: hold
       gravity_compensation:
         kp: 2.0
         kd: 1.5

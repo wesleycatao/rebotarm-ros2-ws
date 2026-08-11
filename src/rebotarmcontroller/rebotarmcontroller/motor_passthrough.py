@@ -5,6 +5,7 @@ from rebotarm_msgs.msg import (
     JointMitCmd,
     JointPosVelCmd,
 )
+from .authorization import CAP_RAW_CONTROL
 
 
 class MotorPassthrough:
@@ -100,7 +101,7 @@ class MotorPassthrough:
             try:
                 command(self._hardware, joint_name, msg)
             except Exception as exc:
-                self._node.get_logger().warn(
+                self._node.get_logger().warning(
                     f"joint {label} failed for {joint_name}: {exc}"
                 )
             finally:
@@ -119,24 +120,29 @@ class MotorPassthrough:
             try:
                 command(self._hardware, msg)
             except Exception as exc:
-                self._node.get_logger().warn(f"gripper {label} failed: {exc}")
+                self._node.get_logger().warning(f"gripper {label} failed: {exc}")
             finally:
                 self._node.publish_arm_status()
 
         return _callback
 
     def _can_send_lowlevel(self, label: str, *, allow_preempt: bool) -> bool:
+        if not self._node.authorization.permits(CAP_RAW_CONTROL):
+            self._node.get_logger().warning(
+                f"rejecting {label}: authorization denied"
+            )
+            return False
         state = self._hardware.state_machine
-        if state in ("GRAVITY_COMP", "SAFE_HOMING"):
-            self._node.get_logger().warn(f"rejecting {label} in state {state}")
+        if state in ("GRAVITY_COMP", "SAFE_HOMING", "PROTECTIVE_STOP"):
+            self._node.get_logger().warning(f"rejecting {label} in state {state}")
             return False
         if state == "TRAJ_RUNNING":
             if self._arbitration == "reject" or not allow_preempt:
-                self._node.get_logger().warn(
+                self._node.get_logger().warning(
                     f"rejecting {label} while trajectory is running"
                 )
                 return False
-            self._node.get_logger().warn(
+            self._node.get_logger().warning(
                 f"preempting trajectory for {label}"
             )
             self._hardware.stop_motion()

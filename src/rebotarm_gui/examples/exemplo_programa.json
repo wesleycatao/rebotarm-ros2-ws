@@ -1,0 +1,133 @@
+{
+  "name": "Exemplo - pick and place simples",
+  "version": 2,
+  "speed_scale": 1.0,
+  "steps": [
+    {
+      "kind": "move",
+      "label": "Home",
+      "pose": {
+        "x": 0.3,
+        "y": 0.0,
+        "z": 0.4,
+        "roll": 0.0,
+        "pitch": 0.0,
+        "yaw": 0.0
+      },
+      "duration": 2.0
+    },
+    {
+      "kind": "move",
+      "label": "Aproxima peça",
+      "pose": {
+        "x": 0.4,
+        "y": 0.15,
+        "z": 0.25,
+        "roll": 0.0,
+        "pitch": 0.0,
+        "yaw": 0.0
+      },
+      "duration": 2.0
+    },
+    {
+      "kind": "gripper",
+      "label": "Fecha gripper",
+      "position_mm": 5.0,
+      "max_effort": 10.0,
+      "timeout": 2.0
+    },
+    {
+      "kind": "wait",
+      "label": "Aguarda 0.5s",
+      "time": 0.5
+    },
+    {
+      "kind": "move",
+      "label": "Sobe com peça",
+      "pose": {
+        "x": 0.4,
+        "y": 0.15,
+        "z": 0.4,
+        "roll": 0.0,
+        "pitch": 0.0,
+        "yaw": 0.0
+      },
+      "duration": 2.0
+    },
+    {
+      "kind": "move",
+      "label": "Vai para destino",
+      "pose": {
+        "x": 0.3,
+        "y": -0.15,
+        "z": 0.3,
+        "roll": 0.0,
+        "pitch": 0.0,
+        "yaw": 0.0
+      },
+      "duration": 2.5
+    },
+    {
+      "kind": "output",
+      "label": "Aciona vácuo/sinal",
+      "io_id": "OUT1",
+      "action": "on"
+    },
+    {
+      "kind": "wait",
+      "label": "Aguarda 0.3s",
+      "time": 0.3
+    },
+    {
+      "kind": "gripper",
+      "label": "Abre gripper",
+      "position_mm": 25.0,
+      "max_effort": 5.0,
+      "timeout": 2.0
+    },
+    {
+      "kind": "output",
+      "label": "Desliga sinal",
+      "io_id": "OUT1",
+      "action": "off"
+    },
+    {
+      "kind": "move",
+      "label": "Retorna home",
+      "pose": {
+        "x": 0.3,
+        "y": 0.0,
+        "z": 0.4,
+        "roll": 0.0,
+        "pitch": 0.0,
+        "yaw": 0.0
+      },
+      "duration": 2.0
+    },
+    {
+      "kind": "loop",
+      "label": "Repete 2x",
+      "count": 2,
+      "steps": [
+        {
+          "kind": "wait",
+          "label": "Pausa curta",
+          "time": 0.2
+        },
+        {
+          "kind": "move",
+          "label": "Pequeno deslocamento",
+          "pose": {
+            "x": 0.32,
+            "y": 0.0,
+            "z": 0.4,
+            "roll": 0.0,
+            "pitch": 0.0,
+            "yaw": 0.0
+          },
+          "duration": 1.0
+        }
+      ]
+    }
+  ]
+}

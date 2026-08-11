@@ -90,7 +90,7 @@ class MoveItDemoBase:
             name in self._latest_joint_positions for name in self.joint_names
         ):
             if time.monotonic() >= deadline:
-                self.node.get_logger().warn(
+                self.node.get_logger().warning(
                     "Timed out waiting for /joint_states or /rebotarm/joint_states; "
                     f"using configured {fallback_name}"
                 )

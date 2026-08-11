@@ -1,0 +1,10 @@
+# Example YOLO dataset configuration for reBotArm object detection.
+# Replace the path with the absolute path to your dataset root.
+
+path: /home/user/datasets/rebotarm_pieces
+train: images/train
+val: images/val
+test: images/test
+
+names:
+  0: peca

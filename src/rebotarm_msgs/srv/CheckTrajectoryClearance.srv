@@ -1,0 +1,16 @@
+# Bounded joint states sampled from one plan-only trajectory.
+sensor_msgs/JointState[] states
+string group_name
+---
+bool success
+string message
+# One result per requested state. available=false means that the collision
+# backend could not produce a finite metric distance for that sample.
+bool[] available
+float64[] distance_m
+bool[] collision
+string[] body_1
+string[] body_2
+string[] source
+geometry_msgs/Point[] nearest_point_1
+geometry_msgs/Point[] nearest_point_2

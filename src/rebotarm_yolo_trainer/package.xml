@@ -1,0 +1,20 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>rebotarm_yolo_trainer</name>
+  <version>0.3.0</version>
+  <description>Simple YOLO training/export utilities for reBotArm object detection.</description>
+  <maintainer email="support@example.com">reBotArm Maintainers</maintainer>
+  <license>Apache-2.0</license>
+
+  <buildtool_depend>ament_python</buildtool_depend>
+
+  <exec_depend>python3-opencv</exec_depend>
+  <exec_depend>python3-yaml</exec_depend>
+  <!-- ultralytics is installed via pip (see README). Not declared here because
+       it is not available as a system Debian package on all distros. -->
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>

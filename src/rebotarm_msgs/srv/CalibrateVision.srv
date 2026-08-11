@@ -1,0 +1,10 @@
+sensor_msgs/Image image
+string prompt
+string api_key
+int32 max_iterations
+float64 max_time_s
+---
+bool success
+string message
+string profile_json
+string report

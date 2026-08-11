@@ -67,7 +67,7 @@ class JointStatePublisher:
         try:
             pos, vel, effort = self._hardware.get_joint_state()
         except Exception as exc:
-            self._node.get_logger().warn(f"joint state read failed: {exc}")
+            self._node.get_logger().warning(f"joint state read failed: {exc}")
             return
 
         msg = JointState()

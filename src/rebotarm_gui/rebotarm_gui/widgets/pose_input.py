@@ -12,11 +12,12 @@ from PySide6.QtWidgets import (
     QFormLayout,
     QGroupBox,
     QHBoxLayout,
-    QLabel,
     QRadioButton,
     QVBoxLayout,
     QWidget,
 )
+
+from .layout_utils import shrink_spinbox
 
 
 def _rpy_to_quat(roll: float, pitch: float, yaw: float) -> Tuple[float, float, float, float]:
@@ -124,7 +125,9 @@ class PoseInput(QWidget):
         spin.setValue(value)
         spin.setSuffix(suffix)
         spin.setAlignment(Qt.AlignRight)
-        spin.setMinimumWidth(150)
+        spin.setMinimumWidth(110)
+        spin.setMaximumWidth(180)
+        shrink_spinbox(spin)
         return spin
 
     def _update_orientation_visibility(self) -> None:
